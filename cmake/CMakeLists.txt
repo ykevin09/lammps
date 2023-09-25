@@ -31,6 +31,7 @@ endif()
 ########################################
 
 project(lammps CXX)
+enable_language(C)
 set(SOVERSION 0)
 get_property(BUILD_IS_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
 
