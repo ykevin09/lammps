@@ -282,6 +282,13 @@ TEST_F(VariableTest, AtomicSystem)
     ASSERT_DOUBLE_EQ(variable->compute_equal("v_rgsum"), 3.75);
     ASSERT_DOUBLE_EQ(variable->compute_equal("v_sum[1]"), 1.25);
 
+    // check handling of immediate variables
+    ASSERT_DOUBLE_EQ(variable->compute_equal("f_press[1]"), 0.0);
+    ASSERT_DOUBLE_EQ(variable->compute_equal("c_press"), 0.0);
+    ASSERT_DOUBLE_EQ(variable->compute_equal("c_press[2]"), 0.0);
+    ASSERT_DOUBLE_EQ(variable->compute_equal("1.5+3.25"), 4.75);
+    ASSERT_DOUBLE_EQ(variable->compute_equal("-2.5*1.5"), -3.75);
+
     TEST_FAILURE(".*ERROR: Cannot redefine variable as a different style.*",
                  command("variable one atom x"););
     TEST_FAILURE(".*ERROR: Cannot redefine variable as a different style.*",
@@ -294,6 +301,8 @@ TEST_F(VariableTest, AtomicSystem)
                  variable->compute_equal("v_self"););
     TEST_FAILURE(".*ERROR: Variable sum2: Inconsistent lengths in vector-style variable.*",
                  variable->compute_equal("max(v_sum2)"););
+    TEST_FAILURE("ERROR: Mismatched fix in variable formula.*",
+                 variable->compute_equal("f_press"););
 }
 
 TEST_F(VariableTest, Expressions)
@@ -391,6 +400,8 @@ TEST_F(VariableTest, Functions)
     command("variable ten2   equal     asin(-1.0)+acos(0.0)");
     command("variable ten3   equal     floor(100*random(0.2,0.8,v_seed)+1)");
     command("variable ten4   equal     extract_setting(world_size)");
+    command("variable ten5   equal     ternary(v_one,1.1,-2.2)");
+    command("variable ten6   equal     ternary(${one}==2.0,v_nine,v_ten)");
     END_HIDE_OUTPUT();
 
     ASSERT_GT(variable->compute_equal(variable->find("two")), 0.99);
@@ -405,6 +416,8 @@ TEST_F(VariableTest, Functions)
     ASSERT_GT(variable->compute_equal(variable->find("ten3")), 19);
     ASSERT_LT(variable->compute_equal(variable->find("ten3")), 81);
     ASSERT_DOUBLE_EQ(variable->compute_equal(variable->find("ten4")), 1);
+    ASSERT_DOUBLE_EQ(variable->compute_equal(variable->find("ten5")), 1.1);
+    ASSERT_DOUBLE_EQ(variable->compute_equal(variable->find("ten6")), 3);
 
     TEST_FAILURE(".*ERROR: Variable four: Invalid syntax in variable formula.*",
                  command("print \"${four}\""););
@@ -590,7 +603,7 @@ TEST_F(VariableTest, NextCommand)
                  command("next five four"););
 }
 
-TEST_F(VariableTest, Label2TypeAtomic)
+TEST_F(VariableTest, LabelMapAtomic)
 {
     BEGIN_HIDE_OUTPUT();
     command("region box block 0 2 0 2 0 2");
@@ -608,14 +621,20 @@ TEST_F(VariableTest, Label2TypeAtomic)
     ASSERT_DOUBLE_EQ(variable->compute_equal("label2type(atom,N1)"), 2.0);
     ASSERT_DOUBLE_EQ(variable->compute_equal("label2type(atom,O1)"), 3.0);
     ASSERT_DOUBLE_EQ(variable->compute_equal("label2type(atom,H1)"), 4.0);
+    ASSERT_DOUBLE_EQ(variable->compute_equal("is_typelabel(atom,N1)"), 1.0);
+    ASSERT_DOUBLE_EQ(variable->compute_equal("is_typelabel(atom,N2)"), 0.0);
+    ASSERT_DOUBLE_EQ(variable->compute_equal("is_typelabel(atom,O)"), 0.0);
+    ASSERT_DOUBLE_EQ(variable->compute_equal("is_typelabel(atom,H1)"), 1.0);
 
     TEST_FAILURE(".*ERROR: Variable t1: Invalid atom type label C1 in label2type.. in variable.*",
                  command("print \"${t1}\""););
-    TEST_FAILURE(".*ERROR: Invalid bond type label H1 in label2type.. in variable.*",
-                 variable->compute_equal("label2type(bond,H1)"););
+    TEST_FAILURE(".*ERROR: Invalid kind xxx in label2type.. in variable.*",
+                 variable->compute_equal("label2type(xxx,H1)"););
+    TEST_FAILURE(".*ERROR: Invalid kind xxx in is_typelabel.. in variable.*",
+                 variable->compute_equal("is_typelabel(xxx,H1)"););
 }
 
-TEST_F(VariableTest, Label2TypeMolecular)
+TEST_F(VariableTest, LabelMapMolecular)
 {
     if (!info->has_style("atom", "full")) GTEST_SKIP();
 
@@ -637,6 +656,14 @@ TEST_F(VariableTest, Label2TypeMolecular)
     command("variable a2 equal \"\"\"label2type(angle,N2'-C1\"-N2')\"\"\"");
     command("variable d1 equal label2type(dihedral,C1-N2-C1-N2)");
     command("variable i1 equal label2type(improper,C1-N2-C1-N2)");
+
+    command("variable l1 equal is_typelabel(atom,C2)+is_typelabel(bond,C2-N1)"
+            "+is_typelabel(bond,[X1][Y1])+is_typelabel(angle,C1-C2-N1)"
+            "+is_typelabel(dihedral,N2-C1-C1-N2)+is_typelabel(improper,N2-C1-C1-N2)");
+    command("variable l2 equal is_typelabel(atom,C1)+is_typelabel(bond,C1-N2)"
+            "+is_typelabel(bond,[C1][C1])+is_typelabel(angle,C1-N2-C1)"
+            "+is_typelabel(dihedral,C1-N2-C1-N2)+is_typelabel(improper,C1-N2-C1-N2)");
+
     END_HIDE_OUTPUT();
 
     ASSERT_THAT(variable->retrieve("t1"), StrEq("1"));
@@ -647,6 +674,30 @@ TEST_F(VariableTest, Label2TypeMolecular)
     ASSERT_THAT(variable->retrieve("a2"), StrEq("2"));
     ASSERT_THAT(variable->retrieve("d1"), StrEq("1"));
     ASSERT_THAT(variable->retrieve("i1"), StrEq("1"));
+    ASSERT_THAT(variable->retrieve("l1"), StrEq("0"));
+    ASSERT_THAT(variable->retrieve("l2"), StrEq("6"));
+
+    ASSERT_DOUBLE_EQ(variable->compute_equal("is_typelabel(atom,N2')"), 1.0);
+    ASSERT_DOUBLE_EQ(variable->compute_equal("is_typelabel(atom,\"N2'\")"), 0.0);
+    ASSERT_DOUBLE_EQ(variable->compute_equal("is_typelabel(bond,C1-N2)"), 1.0);
+    ASSERT_DOUBLE_EQ(variable->compute_equal("is_typelabel(bond,C2-N1)"), 0.0);
+    ASSERT_DOUBLE_EQ(variable->compute_equal("is_typelabel(bond,[C1][C1])"), 1.0);
+    ASSERT_DOUBLE_EQ(variable->compute_equal("is_typelabel(bond,[X1][Y1])"), 0.0);
+    ASSERT_DOUBLE_EQ(variable->compute_equal("is_typelabel(angle,C1-C2-N1)"), 0.0);
+    ASSERT_DOUBLE_EQ(variable->compute_equal("is_typelabel(angle,C1-N2-C1)"), 1.0);
+    ASSERT_DOUBLE_EQ(variable->compute_equal("is_typelabel(dihedral,C1-N2-C1-N2)"), 1.0);
+    ASSERT_DOUBLE_EQ(variable->compute_equal("is_typelabel(dihedral,N2-C1-C1-N2)"), 0.0);
+    ASSERT_DOUBLE_EQ(variable->compute_equal("is_typelabel(improper,C1-N2-C1-N2)"), 1.0);
+    ASSERT_DOUBLE_EQ(variable->compute_equal("is_typelabel(improper,N2-C1-C1-N2)"), 0.0);
+
+    TEST_FAILURE(".*ERROR: Invalid bond type label H1 in label2type.. in variable.*",
+                 variable->compute_equal("label2type(bond,H1)"););
+    TEST_FAILURE(".*ERROR: Invalid angle type label H1 in label2type.. in variable.*",
+                 variable->compute_equal("label2type(angle,H1)"););
+    TEST_FAILURE(".*ERROR: Invalid dihedral type label H1 in label2type.. in variable.*",
+                 variable->compute_equal("label2type(dihedral,H1)"););
+    TEST_FAILURE(".*ERROR: Invalid improper type label H1 in label2type.. in variable.*",
+                 variable->compute_equal("label2type(improper,H1)"););
 }
 
 TEST_F(VariableTest, Format)
@@ -729,15 +780,31 @@ TEST_F(VariableTest, Format)
     //    TEST_FAILURE(".*ERROR: Incorrect conversion in format string.*",
     //                 command("print \"${f1idx}\""););
 }
+
+TEST_F(VariableTest, Set)
+{
+    BEGIN_HIDE_OUTPUT();
+    command("variable three  string    three");
+    command("variable ten    internal  10.0");
+    END_HIDE_OUTPUT();
+    ASSERT_EQ(variable->nvar, 3);
+    ASSERT_THAT(variable->retrieve("three"), StrEq("three"));
+    ASSERT_THAT(variable->retrieve("ten"), StrEq("10"));
+
+    ASSERT_EQ(variable->internalstyle(variable->find("three")), 0);
+    ASSERT_EQ(variable->internalstyle(variable->find("ten")), 1);
+
+    variable->set_string("three", "new");
+    ASSERT_THAT(variable->retrieve("three"), StrEq("new"));
+    variable->internal_set(variable->find("ten"), -2.5);
+    ASSERT_THAT(variable->retrieve("ten"), StrEq("-2.5"));
+}
 } // namespace LAMMPS_NS
 
 int main(int argc, char **argv)
 {
     MPI_Init(&argc, &argv);
     ::testing::InitGoogleMock(&argc, argv);
-
-    if (LAMMPS_NS::platform::mpi_vendor() == "Open MPI" && !Info::has_exceptions())
-        std::cout << "Warning: using OpenMPI without exceptions. Death tests will be skipped\n";
 
     // handle arguments passed via environment variable
     if (const char *var = getenv("TEST_ARGS")) {
